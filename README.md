@@ -133,13 +133,34 @@ WSL2 receives packets via two hardware bypass mechanisms unavailable to the Wind
 - **ManagementOS vNIC with VMQ**: A host-side vNIC still delivers packets through `vmswitch.sys` software forwarding → `VmsProxyHNic.sys` → NDIS LWF. VMQ data-plane offload only applies to child-partition (VM) vNICs.
 - **VMBus VSC kernel driver**: Would still require passing through `vmswitch.sys` on the host, adding an extra ring-buffer copy with no net gain over Npcap.
 
+#### Why you cannot install netvsc.sys on the host
+
+It is tempting to simply install `netvsc.sys` on the Windows host to gain the same fast path WSL2 uses. This does not work for a fundamental hardware-enumeration reason:
+
+`netvsc.sys` binds to the device ID `VMBUS\{f8615163-df3e-46c5-913f-f2d2f965ed0e}`. That device node is only enumerated by the Hyper-V hypervisor inside **child partitions** (VMs). The root partition's device tree contains `ROOT\VMBUS` (the VMBus provider controller) but never `VMBUS\{f8615163-...}` — so there is simply no device for the driver to attach to. Forcing a manual install returns "device not found". Even if the driver binary were somehow loaded, its `DriverEntry` calls `VmbChannelOpen()` which waits for a `ChannelOffer` from `vmswitch.sys`; `vmswitch.sys` only sends offers to child partitions, never to itself, so the driver would stall indefinitely.
+
 #### Path to closing the gap
 
 The only approaches that actually bypass the NDIS LWF chain from a native Windows process:
 
 - **Intel i225-V PCIe NIC** (~¥60–100): Its miniport driver implements Native XDP. Packets are intercepted inside the miniport before any LWF sees them, on both TX and RX.
 - **DPDK with a supported NIC** (Intel i350/i210/i225): Full kernel bypass via a user-space Poll Mode Driver.
-- **Run ZMap inside WSL2**: Already uses the optimal path (VMQ + Native XDP via `netvsc.sys`). This is the recommended approach if WSL2-level performance is required on existing hardware.
+- **Run ZMap inside a Linux VM or WSL2**: See recommendation below.
+
+#### Recommendation: use a Linux VM instead of a Windows VM
+
+If you need ZMap performance close to bare-metal Linux and are already running Hyper-V, **running ZMap inside a Linux guest (or WSL2) is strictly better than running it inside a Windows guest**:
+
+| Environment | Send path | Receive path | Relative performance |
+|---|---|---|---|
+| Windows host (RTL8125) | Generic XDP → NDIS LWF | Npcap LWF | ~42–51% |
+| Windows Hyper-V VM + Npcap | netvsc → VMBus → vmswitch | netvsc + NDIS LWF in guest | ~50–60% (estimated) |
+| Windows Hyper-V VM + Native XDP | netvsc Native XDP | netvsc Native XDP | ~80–90% (estimated) |
+| WSL2 / Linux Hyper-V VM | netvsc Native XDP | VMQ bypass + netvsc Native XDP | 100% (baseline) |
+
+A Linux guest gets the same `netvsc.sys` VMQ + Native XDP fast path as WSL2, with no NDIS stack at all on the receive side. A Windows guest still pays the full Windows NDIS + Npcap overhead inside the VM. The VMBus ring-buffer hop (guest ↔ host) is the same cost in both cases, so the Linux guest wins on every other dimension.
+
+**If you are on Windows and need maximum scan performance: use WSL2 or a Linux VM.** The Windows-native port exists for environments where WSL2/Linux is not available or for integration with Windows tooling.
 
 Architecture
 ------------
