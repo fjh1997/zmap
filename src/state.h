@@ -167,6 +167,13 @@ struct state_send {
 	double finish;
 	uint64_t packets_sent;
 	uint64_t targets_scanned;
+	uint64_t batch_send_calls;
+	uint64_t batch_packets_attempted;
+	uint64_t batch_packets_sent;
+#ifdef _WIN32
+	uint64_t win_xdp_batch_calls;
+	uint64_t win_npcap_batch_calls;
+#endif
 	int warmup;
 	int complete;
 	uint32_t first_scanned;
@@ -180,6 +187,12 @@ extern struct state_send zsend;
 
 // global receiver stats
 struct state_recv {
+	// packets handed to handle_packet()
+	uint64_t packets_seen;
+	// packets too short to parse minimal headers
+	uint64_t packets_too_small;
+	// TCP/UDP packets whose destination port is outside source-port range
+	uint64_t packets_wrong_dst_port;
 	// valid responses classified as "success"
 	uint64_t success_total;
 	// unique IPs that sent valid responses classified as "success"
@@ -215,6 +228,10 @@ struct state_recv {
 	uint64_t pcap_drop;
 	// number of packets dropped by the network interface or its driver.
 	uint64_t pcap_ifdrop;
+	// recv loop behavior (pcap_dispatch)
+	uint64_t pcap_dispatch_calls;
+	uint64_t pcap_dispatch_zero;
+	uint64_t pcap_dispatch_packets;
 };
 extern struct state_recv zrecv;
 

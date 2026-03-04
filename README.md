@@ -106,13 +106,40 @@ Backend control via environment variables:
 - `ZMAP_WIN_XDP_RX_MULTI=1` to try opening multiple RX queues (queue 0..N).
 - `ZMAP_WIN_XDP_RX_QUEUE=<id>` to pin XDP RX to a single queue.
 
-### Why Windows host is slower than WSL2 on RTL8125
+### Windows performance vs WSL2 — architectural analysis
 
-On common Realtek RTL8125 Windows drivers, XDP works in Generic mode (NDIS/LWF path), not Native mode (miniport fast path).  
-WSL2 traffic uses Hyper-V guest networking (`netvsc` + VMQ/VMBus data path), which bypasses most host-side LWF overhead.  
-The host/root partition cannot use guest `netvsc` semantics directly, so this performance gap is architectural on this NIC/driver stack.
+**Observed**: Native Windows ZMap (XDP + Npcap) reaches ~42–51% of WSL2 hit-rate at 10 Kpps on a Realtek RTL8125 NIC. This gap is architectural, not a software bug.
 
-To get closer to WSL2 performance from a native Windows process, use hardware/driver stacks that support Native XDP.
+#### Why WSL2 is faster
+
+WSL2 receives packets via two hardware bypass mechanisms unavailable to the Windows root partition:
+
+1. **VMQ (Virtual Machine Queue)**: The RTL8125 hardware DMA-writes packets destined for WSL2's virtual MAC directly into a VMBus ring buffer, bypassing the entire Windows NDIS stack (including all LWF drivers). Npcap running on the host never sees these packets.
+
+2. **Native XDP via `netvsc.sys`**: WSL2's synthetic NIC driver (`netvsc.sys`) implements Native XDP, which runs inside the miniport driver before any LWF filter can intercept. This allows zero-copy packet I/O at the Hyper-V VMBus layer.
+
+#### Why the root partition cannot do the same
+
+| Bypass mechanism | Available to Windows host process? | Reason |
+|---|---|---|
+| VMQ hardware queue | ❌ | VMQ sub-queues are assigned to child partitions by virtual MAC. The host's physical MAC is the NDIS default queue — no VMQ offload path exists for it. |
+| `netvsc.sys` | ❌ | `netvsc.sys` is a VMBus consumer (VSC). The root partition *is* the VMBus provider (VSP); a process cannot be both simultaneously. This is a Hyper-V hypervisor architectural constraint. |
+| Native XDP | ❌ on RTL8125 | Native XDP requires explicit support inside the miniport driver. Realtek's Windows driver does not implement it. |
+| Generic XDP (NDIS LWF) | ✅ | Used by default. Runs above the miniport, so it does not bypass the LWF chain. |
+
+#### Tested workarounds (all failed on RTL8125)
+
+- **Hyper-V External Switch + `VmsProxyHNic.sys`**: XDP bind succeeds and 16 queues open, but RX receives zero packets. TX drops to ~58 pps. `VmsProxyHNic.sys` uses a non-standard Hyper-V internal delivery path that bypasses the Generic XDP hook.
+- **ManagementOS vNIC with VMQ**: A host-side vNIC still delivers packets through `vmswitch.sys` software forwarding → `VmsProxyHNic.sys` → NDIS LWF. VMQ data-plane offload only applies to child-partition (VM) vNICs.
+- **VMBus VSC kernel driver**: Would still require passing through `vmswitch.sys` on the host, adding an extra ring-buffer copy with no net gain over Npcap.
+
+#### Path to closing the gap
+
+The only approaches that actually bypass the NDIS LWF chain from a native Windows process:
+
+- **Intel i225-V PCIe NIC** (~¥60–100): Its miniport driver implements Native XDP. Packets are intercepted inside the miniport before any LWF sees them, on both TX and RX.
+- **DPDK with a supported NIC** (Intel i350/i210/i225): Full kernel bypass via a user-space Poll Mode Driver.
+- **Run ZMap inside WSL2**: Already uses the optimal path (VMQ + Native XDP via `netvsc.sys`). This is the recommended approach if WSL2-level performance is required on existing hardware.
 
 Architecture
 ------------

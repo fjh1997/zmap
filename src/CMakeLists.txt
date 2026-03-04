@@ -133,6 +133,9 @@ elseif(WITH_NETMAP)
         set(SOURCES ${SOURCES} if-netmap-linux.c)
         set(ZTESTSOURCES ${ZTESTSOURCES} if-netmap-linux.c)
     endif()
+elseif(WIN32)
+    set(SOURCES ${SOURCES} socket-win.c send-win.c xdp-win.c)
+    set(ZTESTSOURCES ${ZTESTSOURCES} socket-win.c send-win.c xdp-win.c)
 elseif (APPLE OR BSD)
     set(SOURCES ${SOURCES} socket-bsd.c send-bsd.c)
     set(ZTESTSOURCES ${ZTESTSOURCES} socket-bsd.c send-bsd.c)
@@ -205,7 +208,7 @@ add_custom_command(OUTPUT parser.c
 )
 else()
 add_custom_command(OUTPUT parser.c
-    COMMAND byacc -d -o "${CMAKE_CURRENT_BINARY_DIR}/parser.c" "${CMAKE_CURRENT_SOURCE_DIR}/parser.y"
+    COMMAND bison -y -d -o "${CMAKE_CURRENT_BINARY_DIR}/parser.c" "${CMAKE_CURRENT_SOURCE_DIR}/parser.y"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/parser.y"
 )
 endif()
@@ -224,48 +227,177 @@ add_executable(ziterate ${ZITSOURCES})
 add_executable(ztee ${ZTEESOURCES})
 add_executable(ztests ${ZTESTSOURCES})
 
+if(WIN32)
+    set(PCAP_WIN_LIB pcap)
+    set(PCAP_WIN_RUNTIME_DLLS)
+    set(PCAP_WIN_RENAMED_DLL_SRC)
+    set(MINGW_RUNTIME_DLLS)
+
+    if(MINGW)
+        set(NPCAP_DIR "C:/Windows/System32/Npcap")
+        set(NPCAP_WPCAP_DLL "${NPCAP_DIR}/wpcap.dll")
+        set(NPCAP_PACKET_DLL "${NPCAP_DIR}/Packet.dll")
+        get_filename_component(MINGW_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+
+        foreach(MINGW_RUNTIME_DLL_NAME
+                libwinpthread-1.dll
+                libgcc_s_seh-1.dll
+                libgmp-10.dll
+                libjson-c-5.dll
+                libiconv-2.dll
+                libunistring-5.dll)
+            set(MINGW_RUNTIME_DLL_PATH "${MINGW_BIN_DIR}/${MINGW_RUNTIME_DLL_NAME}")
+            if(EXISTS "${MINGW_RUNTIME_DLL_PATH}")
+                list(APPEND MINGW_RUNTIME_DLLS "${MINGW_RUNTIME_DLL_PATH}")
+            endif()
+        endforeach()
+
+        if(EXISTS "${NPCAP_WPCAP_DLL}" AND EXISTS "${NPCAP_PACKET_DLL}")
+            set(PCAP_WIN_RUNTIME_DLLS
+                "${NPCAP_PACKET_DLL}"
+                "${NPCAP_WPCAP_DLL}")
+            # Linker still targets libpcap.dll; provide Npcap runtime under that name.
+            set(PCAP_WIN_RENAMED_DLL_SRC "${NPCAP_WPCAP_DLL}")
+            message(STATUS "Windows build: bundling Npcap runtime DLLs")
+        else()
+            message(STATUS "Windows build: Npcap runtime DLLs not found, using system libpcap")
+        endif()
+
+        if(MINGW_RUNTIME_DLLS)
+            message(STATUS "Windows build: bundling MinGW runtime DLLs from ${MINGW_BIN_DIR}")
+        else()
+            message(STATUS "Windows build: MinGW runtime DLLs not detected at ${MINGW_BIN_DIR}")
+        endif()
+    endif()
+endif()
+
 if(APPLE OR BSD)
 else()
     set(ZTESTSOURCES ${ZTESTSOURCES} send-linux.c)
     set(SOURCES ${SOURCES} send-linux.c)
 endif()
 
-target_link_libraries(
-    zmap
-    zmaplib
-    ${PFRING_LIBRARIES}
-    pcap gmp m unistring
-    ${JSON_LIBRARIES}
-	${JUDY_LIBRARIES}
-)
+if(WIN32)
+    target_link_libraries(
+        zmap
+        zmaplib
+        ${PCAP_WIN_LIB}
+        gmp
+        ${JSON_LIBRARIES}
+        ${JUDY_LIBRARIES}
+        ws2_32
+        iphlpapi
+        bcrypt
+        unistring
+        winmm
+    )
 
-target_link_libraries(
-    zblocklist
-    zmaplib
-    m
-)
+    target_link_libraries(
+        zblocklist
+        zmaplib
+        ws2_32
+        bcrypt
+    )
 
-target_link_libraries(
-    ziterate
-    zmaplib
-    gmp
-    m
-)
+    target_link_libraries(
+        ziterate
+        zmaplib
+        gmp
+        ws2_32
+        bcrypt
+    )
 
-target_link_libraries(
-    ztee
-    zmaplib
-    m
-)
+    target_link_libraries(
+        ztee
+        zmaplib
+        ws2_32
+        bcrypt
+    )
 
-target_link_libraries(
-    ztests
-    zmaplib
-    ${PFRING_LIBRARIES}
-    pcap gmp m unistring
-    ${JSON_LIBRARIES}
-	${JUDY_LIBRARIES}
-)
+    target_link_libraries(
+        ztests
+        zmaplib
+        ${PCAP_WIN_LIB}
+        gmp
+        ${JSON_LIBRARIES}
+        ${JUDY_LIBRARIES}
+        ws2_32
+        iphlpapi
+        bcrypt
+        unistring
+        winmm
+    )
+
+    if(PCAP_WIN_RUNTIME_DLLS)
+        foreach(dll ${PCAP_WIN_RUNTIME_DLLS})
+            add_custom_command(
+                TARGET zmap
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${dll}"
+                        "$<TARGET_FILE_DIR:zmap>"
+            )
+        endforeach()
+        if(PCAP_WIN_RENAMED_DLL_SRC)
+            add_custom_command(
+                TARGET zmap
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${PCAP_WIN_RENAMED_DLL_SRC}"
+                        "$<TARGET_FILE_DIR:zmap>/libpcap.dll"
+            )
+        endif()
+    endif()
+
+    if(MINGW_RUNTIME_DLLS)
+        foreach(dll ${MINGW_RUNTIME_DLLS})
+            add_custom_command(
+                TARGET zmap
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${dll}"
+                        "$<TARGET_FILE_DIR:zmap>"
+            )
+        endforeach()
+    endif()
+else()
+    target_link_libraries(
+        zmap
+        zmaplib
+        ${PFRING_LIBRARIES}
+        pcap gmp m unistring
+        ${JSON_LIBRARIES}
+        ${JUDY_LIBRARIES}
+    )
+
+    target_link_libraries(
+        zblocklist
+        zmaplib
+        m
+    )
+
+    target_link_libraries(
+        ziterate
+        zmaplib
+        gmp
+        m
+    )
+
+    target_link_libraries(
+        ztee
+        zmaplib
+        m
+    )
+
+    target_link_libraries(
+        ztests
+        zmaplib
+        ${PFRING_LIBRARIES}
+        pcap gmp m unistring
+        ${JSON_LIBRARIES}
+        ${JUDY_LIBRARIES}
+    )
+endif()
 
 # Install binary
 install(

@@ -19,7 +19,13 @@
 #include <string.h>
 #include <getopt.h>
 #include <assert.h>
+#ifndef _WIN32
 #include <unistd.h>
+#else
+#include "../lib/compat_win.h"
+#define access _access
+#define R_OK 4
+#endif
 
 #include "../lib/includes.h"
 #include "../lib/blocklist.h"
@@ -128,10 +134,6 @@ int main(int argc, char **argv)
 	}
 	conf.destination_cidrs = args.inputs;
 	conf.destination_cidrs_len = args.inputs_num;
-	// max targets
-	if (args.max_targets_given) {
-		conf.max_hosts = parse_max_targets(args.max_targets_arg, zconf.ports->port_count);
-	}
 
 	// sanity check blocklist file
 	if (conf.blocklist_filename) {
@@ -216,6 +218,11 @@ int main(int argc, char **argv)
 		parse_ports(args.target_ports_arg, zconf.ports);
 	} else {
 		zconf.ports->port_count = 1;
+	}
+	// max targets
+	if (args.max_targets_given) {
+		conf.max_hosts = parse_max_targets(args.max_targets_arg,
+						   zconf.ports->port_count);
 	}
 
 	uint64_t num_addrs = blocklist_count_allowed();

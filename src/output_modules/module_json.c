@@ -16,13 +16,7 @@
 #include "../../lib/includes.h"
 #include "../../lib/xalloc.h"
 
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
-#include <netinet/ip_icmp.h>
-#include <arpa/inet.h>
+#include "../../lib/includes.h"
 
 #include <json.h>
 

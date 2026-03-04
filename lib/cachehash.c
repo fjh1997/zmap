@@ -141,7 +141,14 @@ static inline node_t *judy_get(cachehash *ch, void *key, size_t keylen)
 	if (!v_) {
 		return NULL;
 	}
-	return (node_t *)*v_;
+	if (*v_ == 0) {
+		return NULL;
+	}
+	size_t idx = (size_t)(*v_ - 1);
+	if (idx >= ch->maxsize) {
+		return NULL;
+	}
+	return &((node_t *)ch->malloced)[idx];
 }
 
 void *cachehash_has(cachehash *ch, const void *key, size_t keylen)
@@ -217,15 +224,18 @@ void cachehash_put(cachehash *ch, const void *key, size_t keylen, void *value)
 	JHSI(v_, ch->judy, (void *)key, keylen);
 	// key should not already be in hash table
 	assert(!*v_);
-	*v_ = (Word_t)n;
+	size_t idx = (size_t)(n - (node_t *)ch->malloced);
+	assert(idx < ch->maxsize);
+	assert(idx <= ((size_t)(~(Word_t)0) - 1));
+	*v_ = (Word_t)(idx + 1);
 }
 
 // print out entire state.
 void cachehash_debug_dump(cachehash *ch)
 {
 	printf("Statistics:\n");
-	printf("\tcurrent size: %lu\n", ch->currsize);
-	printf("\tmaximum size: %lu\n", ch->maxsize);
+	printf("\tcurrent size: %zu\n", ch->currsize);
+	printf("\tmaximum size: %zu\n", ch->maxsize);
 	printf("\n");
 	printf("Linked List:\n");
 	size_t i = 0;
@@ -233,10 +243,10 @@ void cachehash_debug_dump(cachehash *ch)
 
 	do {
 		if (n->key) {
-			printf("\t%lu: %s -> %s\n", i++, (char *)n->key,
+			printf("\t%zu: %s -> %s\n", i++, (char *)n->key,
 			       (char *)n->data);
 		} else {
-			printf("\t%lu: EMPTY\n", i++);
+			printf("\t%zu: EMPTY\n", i++);
 		}
 		n = n->next;
 	} while (n);

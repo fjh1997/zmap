@@ -16,7 +16,9 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#ifndef _WIN32
 #include <syslog.h>
+#endif
 
 #ifndef LOGGER_H
 #define LOGGER_H
@@ -36,8 +38,14 @@ enum LogLevel {
 	ZNUM_LOGLEVELS
 };
 
+#if defined(__GNUC__) || defined(__clang__)
 int log_fatal(const char *loggerName, const char *logMessage, ...)
     __attribute__((noreturn));
+#elif defined(_MSC_VER)
+__declspec(noreturn) int log_fatal(const char *loggerName, const char *logMessage, ...);
+#else
+int log_fatal(const char *loggerName, const char *logMessage, ...);
+#endif
 
 int log_error(const char *loggerName, const char *logMessage, ...);
 

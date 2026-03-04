@@ -13,10 +13,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
+#include "includes.h"
 
 #include "blocklist.h"
 #include "constraint.h"
@@ -67,9 +64,9 @@ uint32_t blocklist_lookup_index(uint64_t index)
 // check whether a single IP address is allowed to be scanned.
 //		1 => is allowed
 //		0 => is not allowed
-int blocklist_is_allowed(uint32_t s_addr)
+int blocklist_is_allowed(uint32_t ip_addr)
 {
-	return constraint_lookup_ip(constraint, ntohl(s_addr)) == ADDR_ALLOWED;
+	return constraint_lookup_ip(constraint, ntohl(ip_addr)) == ADDR_ALLOWED;
 }
 
 static void _add_constraint(struct in_addr addr, int prefix_len, int value)

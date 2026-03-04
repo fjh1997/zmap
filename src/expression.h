@@ -28,7 +28,7 @@ enum operation { GT,
 enum node_type { OP,
 		 FIELD,
 		 STRING,
-		 INT };
+		 ZMAP_INT };
 
 struct field_id {
 	int index;

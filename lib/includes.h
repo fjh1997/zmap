@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+#ifdef _WIN32
+
+#include "compat_win.h"
+
+#else /* UNIX/Linux/macOS/BSD */
+
 #ifndef __FAVOR_BSD
 #define __FAVOR_BSD 2
 #endif
@@ -43,3 +49,5 @@
 
 #define MAC_ADDR_LEN ETHER_ADDR_LEN
 #define UNUSED __attribute__((unused))
+
+#endif /* _WIN32 */

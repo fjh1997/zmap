@@ -20,9 +20,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include "includes.h"
 
 #include "../lib/constraint.h"
 #include "../lib/logger.h"

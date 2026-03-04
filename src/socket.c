@@ -20,6 +20,14 @@ sock_t get_dryrun_socket(void)
 	memset(&s, 0, sizeof(s));
 
 #if !(defined(PFRING) || defined(NETMAP))
+#ifdef _WIN32
+	/* On Windows, dryrun doesn't need a real socket.
+	 * all send handles remain unset, which is fine for dryrun. */
+	s.win.backend = WIN_SEND_BACKEND_NONE;
+	s.win.xdp = NULL;
+	s.win.pc = NULL;
+	s.win.raw_sock = INVALID_SOCKET;
+#else
 	// we need a socket in order to gather details about the system
 	// such as source MAC address and IP address. However, because
 	// we don't want to require root access in order to run dryrun,
@@ -29,6 +37,7 @@ sock_t get_dryrun_socket(void)
 		log_fatal("send", "couldn't create socket. Error: %s\n",
 			  strerror(errno));
 	}
+#endif
 #endif
 
 	return s;

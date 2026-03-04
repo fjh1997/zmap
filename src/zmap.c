@@ -11,11 +11,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
-#include <assert.h>
 #include <sched.h>
-#include <errno.h>
 #include <pwd.h>
+#else
+/* timeBeginPeriod / timeEndPeriod reduce the system timer interrupt
+ * interval from 15.6ms to 1ms, improving thread scheduling precision
+ * and Sleep() accuracy for the duration of the scan.
+ * Requires linking with -lwinmm. */
+#include "../lib/compat_win.h"
+#include <mmsystem.h>
+#endif
+#include <assert.h>
+#include <errno.h>
 #include <time.h>
 
 #include <pcap/pcap.h>
@@ -76,7 +85,13 @@ pthread_mutex_t recv_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int get_num_cores(void)
 {
+#ifdef _WIN32
+	SYSTEM_INFO si;
+	GetSystemInfo(&si);
+	return si.dwNumberOfProcessors;
+#else
 	return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 }
 
 typedef struct send_arg {
@@ -194,6 +209,12 @@ static void network_config_init(void)
 
 static void start_zmap(void)
 {
+#ifdef _WIN32
+	/* Set Windows timer resolution to 1ms for the duration of the scan.
+	 * The default is ~15.6ms, which causes coarse thread scheduling and
+	 * imprecise Sleep() calls, leading to bursty sends and degraded hitrate. */
+	timeBeginPeriod(1);
+#endif
 	// Initialization
 	assert(zconf.output_module && "no output module set");
 	log_debug("zmap", "output module: %s", zconf.output_module->name);
@@ -337,6 +358,9 @@ static void start_zmap(void)
 	pfring_zc_destroy_cluster(zconf.pf.cluster);
 #endif
 	log_info("zmap", "completed");
+#ifdef _WIN32
+	timeEndPeriod(1);
+#endif
 }
 
 #define SET_IF_GIVEN(DST, ARG)                  \

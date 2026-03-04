@@ -9,7 +9,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <errno.h>
 #include <assert.h>
 #include <string.h>
@@ -20,9 +22,13 @@
 #include "../lib/logger.h"
 #include "../lib/xalloc.h"
 
+#ifndef _WIN32
 #include <sys/ioctl.h>
+#endif
 
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+#if defined(_WIN32)
+#include "get_gateway-win.h"
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
     defined(__DragonFly__)
 #include "get_gateway-bsd.h"
 #else // (linux)

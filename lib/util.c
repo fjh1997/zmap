@@ -26,11 +26,15 @@
 #include "xalloc.h"
 
 #include <errno.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <sched.h>
-#include <pthread.h>
 #include <sys/types.h>
 #include <pwd.h>
+#else
+#include "compat_win.h"
+#endif
+#include <pthread.h>
 
 #include "../lib/logger.h"
 
@@ -274,6 +278,16 @@ int file_exists(char *name)
 #include <uuid/uuid.h>
 #endif
 
+#ifdef _WIN32
+
+int drop_privs(void)
+{
+	/* Windows doesn't use Unix privilege dropping */
+	return EXIT_SUCCESS;
+}
+
+#else /* UNIX */
+
 int drop_privs(void)
 {
 	struct passwd *pw;
@@ -289,7 +303,20 @@ int drop_privs(void)
 	return EXIT_FAILURE;
 }
 
-#if defined(__APPLE__)
+#endif /* _WIN32 */
+
+#if defined(_WIN32)
+
+int set_cpu(uint32_t core)
+{
+	DWORD_PTR mask = (DWORD_PTR)1 << core;
+	if (SetThreadAffinityMask(GetCurrentThread(), mask) == 0) {
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+}
+
+#elif defined(__APPLE__)
 
 #include <mach/thread_act.h>
 
@@ -362,16 +389,52 @@ int set_cpu(uint32_t core)
 
 #endif
 
+#ifdef _WIN32
+/* QueryPerformanceFrequency returns a constant; cache it once. */
+static double qpc_to_secs(void)
+{
+	static LARGE_INTEGER freq = {0};
+	if (!freq.QuadPart) {
+		QueryPerformanceFrequency(&freq);
+	}
+	LARGE_INTEGER counter;
+	QueryPerformanceCounter(&counter);
+	return (double)counter.QuadPart / (double)freq.QuadPart;
+}
+
+/* FILETIME is 100-ns ticks since 1601-01-01 UTC.
+ * Convert to Unix seconds since 1970-01-01 UTC. */
+static double wallclock_now(void)
+{
+	FILETIME ft;
+	ULARGE_INTEGER ts;
+	const uint64_t UNIX_EPOCH_IN_FILETIME = 116444736000000000ULL;
+	GetSystemTimeAsFileTime(&ft);
+	ts.LowPart = ft.dwLowDateTime;
+	ts.HighPart = ft.dwHighDateTime;
+	if (ts.QuadPart <= UNIX_EPOCH_IN_FILETIME) {
+		return 0.0;
+	}
+	return (double)(ts.QuadPart - UNIX_EPOCH_IN_FILETIME) / 10000000.0;
+}
+#endif
+
 double now(void)
 {
+#ifdef _WIN32
+	return wallclock_now();
+#else
 	struct timeval now;
 	gettimeofday(&now, NULL);
 	return (double)now.tv_sec + (double)now.tv_usec / 1000000.;
+#endif
 }
 
 double steady_now(void)
 {
-#if defined(_POSIX_TIMERS) && defined(_POSIX_MONOTONIC_CLOCK)
+#ifdef _WIN32
+	return qpc_to_secs();
+#elif defined(_POSIX_TIMERS) && defined(_POSIX_MONOTONIC_CLOCK)
 	struct timespec tp;
 	clock_gettime(CLOCK_MONOTONIC, &tp);
 	return (double)tp.tv_sec + (double)tp.tv_nsec / 1000000000.;

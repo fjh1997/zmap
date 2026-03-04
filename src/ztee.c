@@ -17,8 +17,12 @@
 #include <errno.h>
 #include <getopt.h>
 #include <pthread.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <signal.h>
+#else
+#include "../lib/compat_win.h"
+#endif
 
 #include "../lib/lockfd.h"
 #include "../lib/logger.h"
@@ -160,7 +164,9 @@ int main(int argc, char *argv[])
 		exit(EXIT_SUCCESS);
 	}
 
+#ifndef _WIN32
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	// Handle help text and version
 	if (args.help_given) {

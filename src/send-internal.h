@@ -19,6 +19,9 @@ int send_batch(sock_t sock, batch_t *batch, int retries);
 #elif defined(NETMAP)
 void submit_batch_internal(batch_t *batch);
 int send_batch_internal(sock_t sock, batch_t *batch);
+#elif defined(_WIN32)
+/* Windows: send-win.c handles send_run_init and send_batch */
+void send_run_cleanup(sock_t s);
 #elif defined(__linux__)
 #include "send-linux.h"
 #endif

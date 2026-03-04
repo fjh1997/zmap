@@ -30,17 +30,25 @@
 void json_metadata(FILE *file)
 {
 	char send_start_time[STRTIME_LEN + 1];
-	assert(dstrftime(send_start_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
-			 zsend.start));
+	if (!dstrftime(send_start_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
+		       zsend.start)) {
+		send_start_time[0] = '\0';
+	}
 	char send_end_time[STRTIME_LEN + 1];
-	assert(dstrftime(send_end_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
-			 zsend.finish));
+	if (!dstrftime(send_end_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
+		       zsend.finish)) {
+		send_end_time[0] = '\0';
+	}
 	char recv_start_time[STRTIME_LEN + 1];
-	assert(dstrftime(recv_start_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
-			 zrecv.start));
+	if (!dstrftime(recv_start_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
+		       zrecv.start)) {
+		recv_start_time[0] = '\0';
+	}
 	char recv_end_time[STRTIME_LEN + 1];
-	assert(dstrftime(recv_end_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
-			 zrecv.finish));
+	if (!dstrftime(recv_end_time, STRTIME_LEN, "%Y-%m-%dT%H:%M:%S%z",
+		       zrecv.finish)) {
+		recv_end_time[0] = '\0';
+	}
 	double hitrate = ((double)100 * zrecv.success_unique) /
 			 ((double)zsend.targets_scanned);
 
@@ -125,6 +133,22 @@ void json_metadata(FILE *file)
 			       json_object_new_int64(zrecv.pcap_drop));
 	json_object_object_add(obj, "pcap_ifdrop",
 			       json_object_new_int64(zrecv.pcap_ifdrop));
+	json_object_object_add(obj, "pcap_dispatch_calls",
+			       json_object_new_int64(
+				   zrecv.pcap_dispatch_calls));
+	json_object_object_add(obj, "pcap_dispatch_zero",
+			       json_object_new_int64(
+				   zrecv.pcap_dispatch_zero));
+	json_object_object_add(obj, "pcap_dispatch_packets",
+			       json_object_new_int64(
+				   zrecv.pcap_dispatch_packets));
+	json_object_object_add(obj, "packets_seen",
+			       json_object_new_int64(zrecv.packets_seen));
+	json_object_object_add(obj, "packets_too_small",
+			       json_object_new_int64(zrecv.packets_too_small));
+	json_object_object_add(
+	    obj, "packets_wrong_dst_port",
+	    json_object_new_int64(zrecv.packets_wrong_dst_port));
 
 	json_object_object_add(obj, "ip_fragments",
 			       json_object_new_int64(zrecv.ip_fragments));
@@ -149,6 +173,28 @@ void json_metadata(FILE *file)
 			       json_object_new_int64(zsend.packets_sent));
 	json_object_object_add(obj, "targets_scanned",
 			       json_object_new_int64(zsend.targets_scanned));
+	json_object_object_add(obj, "send_batch_calls",
+			       json_object_new_int64(zsend.batch_send_calls));
+	json_object_object_add(
+	    obj, "send_batch_packets_attempted",
+	    json_object_new_int64(zsend.batch_packets_attempted));
+	json_object_object_add(obj, "send_batch_packets_sent",
+			       json_object_new_int64(zsend.batch_packets_sent));
+	json_object_object_add(
+	    obj, "send_batch_packets_unsent",
+	    json_object_new_int64(
+		(zsend.batch_packets_attempted > zsend.batch_packets_sent)
+		    ? (zsend.batch_packets_attempted -
+		       zsend.batch_packets_sent)
+		    : 0));
+#ifdef _WIN32
+	json_object_object_add(obj, "win_xdp_batch_calls",
+			       json_object_new_int64(
+				   zsend.win_xdp_batch_calls));
+	json_object_object_add(obj, "win_npcap_batch_calls",
+			       json_object_new_int64(
+				   zsend.win_npcap_batch_calls));
+#endif
 	json_object_object_add(obj, "success_total",
 			       json_object_new_int64(zrecv.success_total));
 	json_object_object_add(obj, "success_unique",

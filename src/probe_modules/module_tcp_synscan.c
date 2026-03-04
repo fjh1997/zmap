@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <string.h>
@@ -32,14 +33,94 @@ static uint8_t zmap_tcp_synscan_packet_len = 54;
 static bool should_validate_src_port = SOURCE_PORT_VALIDATION_MODULE_DEFAULT
 
 probe_module_t module_tcp_synscan;
+static char synscan_pcap_filter[1024];
 
 static uint16_t num_source_ports;
 static uint8_t os_for_tcp_options;
+
+static int synscan_filter_append(char *dst, size_t dst_len, const char *src)
+{
+	size_t cur = strlen(dst);
+	size_t add = strlen(src);
+	if (cur + add >= dst_len) {
+		return 0;
+	}
+	memcpy(dst + cur, src, add + 1);
+	return 1;
+}
+
+static int synscan_filter_appendf(char *dst, size_t dst_len, const char *fmt,
+				  ...)
+{
+	char tmp[128];
+	va_list ap;
+	va_start(ap, fmt);
+	int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+	va_end(ap);
+	if (n < 0 || (size_t)n >= sizeof(tmp)) {
+		return 0;
+	}
+	return synscan_filter_append(dst, dst_len, tmp);
+}
+
+static int synscan_append_tcp_src_ports(char *dst, size_t dst_len,
+					const struct port_conf *ports)
+{
+	if (!ports || ports->port_count == 0) {
+		return 1;
+	}
+
+	// Keep BPF size bounded for broad port scans.
+	if (ports->port_count > 16) {
+		log_debug("tcp_synscan",
+			  "skipping tcp source-port BPF clause (%u ports)",
+			  ports->port_count);
+		return 1;
+	}
+
+	if (!synscan_filter_append(dst, dst_len, " and (")) {
+		return 0;
+	}
+	for (uint i = 0; i < ports->port_count; i++) {
+		if (i > 0 && !synscan_filter_append(dst, dst_len, " or ")) {
+			return 0;
+		}
+		if (!synscan_filter_appendf(dst, dst_len, "tcp src port %u",
+					    (unsigned int)ports->ports[i])) {
+			return 0;
+		}
+	}
+	if (!synscan_filter_append(dst, dst_len, ")")) {
+		return 0;
+	}
+	return 1;
+}
 
 static int synscan_global_initialize(struct state_conf *state)
 {
 	num_source_ports =
 	    state->source_port_last - state->source_port_first + 1;
+
+	synscan_pcap_filter[0] = '\0';
+	if (!synscan_filter_appendf(
+		synscan_pcap_filter, sizeof(synscan_pcap_filter),
+		"(tcp and tcp dst portrange %u-%u and ((tcp[13] & 4) != 0 or (tcp[13] & 18) == 18)",
+		(unsigned int)state->source_port_first,
+		(unsigned int)state->source_port_last) ||
+	    !synscan_append_tcp_src_ports(synscan_pcap_filter,
+					  sizeof(synscan_pcap_filter),
+					  state->ports) ||
+	    !synscan_filter_append(
+		synscan_pcap_filter, sizeof(synscan_pcap_filter),
+		") or (icmp and (icmp[0] == 3 or icmp[0] == 4 or icmp[0] == 5 or icmp[0] == 11))")) {
+		log_warn("tcp_synscan",
+			 "failed to build optimized pcap filter, using fallback");
+		synscan_pcap_filter[0] = '\0';
+	}
+	if (synscan_pcap_filter[0] != '\0') {
+		module_tcp_synscan.pcap_filter = synscan_pcap_filter;
+	}
+
 	if (state->validate_source_port_override == VALIDATE_SRC_PORT_DISABLE_OVERRIDE) {
 		log_debug("tcp_synscan", "disabling source port validation");
 		should_validate_src_port = false;
@@ -150,7 +231,7 @@ void synscan_print_packet(FILE *fp, void *packet)
 	fprintf(fp,
 		"tcp { source: %u | dest: %u | seq: %u | checksum: %#04X }\n",
 		ntohs(tcph->th_sport), ntohs(tcph->th_dport),
-		ntohl(tcph->th_seq), ntohs(tcph->th_sum));
+		(unsigned int)ntohl(tcph->th_seq), ntohs(tcph->th_sum));
 	fprintf_ip_header(fp, iph);
 	fprintf_eth_header(fp, ethh);
 	fprintf(fp, PRINT_PACKET_SEP);
@@ -371,7 +452,9 @@ static fielddef_t fields[] = {
 
 probe_module_t module_tcp_synscan = {
     .name = "tcp_synscan",
-    .pcap_filter = "(tcp && tcp[13] & 4 != 0 || tcp[13] == 18) || icmp",
+    .pcap_filter =
+	"(tcp and ((tcp[13] & 4) != 0 or (tcp[13] & 18) == 18)) or "
+	"(icmp and (icmp[0] == 3 or icmp[0] == 4 or icmp[0] == 5 or icmp[0] == 11))",
     .pcap_snaplen = 96,
     .port_args = 1,
     .global_initialize = &synscan_global_initialize,

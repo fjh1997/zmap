@@ -49,6 +49,12 @@
 #include "../lib/includes.h"
 #include "../lib/logger.h"
 
+static void mpz_init_set_u64(mpz_t out, uint64_t value)
+{
+	mpz_init(out);
+	mpz_import(out, 1, 1, sizeof(value), 0, 0, &value);
+}
+
 // We will pick the first cyclic group from this list that is
 // larger than the number of IPs in our allowlist. E.g. for an
 // entire Internet scan, this would be cyclic32
@@ -140,18 +146,17 @@ static uint32_t find_primroot(const cyclic_group_t *group, aesrand_t *aes)
 		}
 
 		mpz_t prime;
-		mpz_init_set_ui(prime, group->prime);
+		mpz_init_set_u64(prime, group->prime);
 		int ok = 1;
 		for (size_t i = 0; i < group->num_prime_factors && ok; ++i) {
 			const uint64_t q = group->prime_factors[i];
 			const uint64_t k = (group->prime - 1) / q;
 			mpz_t base, power, res;
-			mpz_init_set_ui(base, candidate);
-			mpz_init_set_ui(power, k);
+			mpz_init_set_u64(base, candidate);
+			mpz_init_set_u64(power, k);
 			mpz_init(res);
 			mpz_powm(res, base, power, prime);
-			uint64_t res_ui = mpz_get_ui(res);
-			if (res_ui == 1) {
+			if (mpz_cmp_ui(res, 1) == 0) {
 				ok = 0;
 			}
 			mpz_clear(base);

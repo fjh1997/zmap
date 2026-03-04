@@ -20,12 +20,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sched.h>
+#include <pwd.h>
+#else
+#include "../lib/compat_win.h"
+#define access _access
+#define R_OK 4
+#endif
 #include <getopt.h>
 #include <assert.h>
-#include <sched.h>
 #include <errno.h>
-#include <pwd.h>
 #include <time.h>
 
 #include "../lib/includes.h"

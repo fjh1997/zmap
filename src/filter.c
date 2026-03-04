@@ -15,8 +15,6 @@
 
 #include <string.h>
 
-extern int yyparse(void);
-
 node_t *zfilter;
 
 static int validate_node(node_t *node, fielddefset_t *fields)
@@ -58,7 +56,7 @@ static int validate_node(node_t *node, fielddefset_t *fields)
 					fields->fielddefs[index].name);
 				return 0;
 			}
-		case INT:
+		case ZMAP_INT:
 			if (strcmp(fields->fielddefs[index].type, "int") == 0 ||
 			    strcmp(fields->fielddefs[index].type, "bool") ==
 				0) {

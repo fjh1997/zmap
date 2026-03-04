@@ -53,7 +53,7 @@ static int eval_eq_node(node_t *node, fieldset_t *fields)
 		actual = fs_get_string_by_index(fields, index);
 		return (strcmp(expected, actual) == 0);
 		break;
-	case INT:
+	case ZMAP_INT:
 		return (fs_get_uint64_by_index(fields, index) ==
 			literal->value.int_literal);
 		break;
@@ -103,7 +103,7 @@ node_t *make_string_node(char *literal)
 node_t *make_int_node(int literal)
 {
 	node_t *node = alloc_node();
-	node->type = INT;
+	node->type = ZMAP_INT;
 	node->value.int_literal = literal;
 	return node;
 }
@@ -115,7 +115,7 @@ int evaluate_expression(node_t *root, fieldset_t *fields)
 	switch (root->type) { /* XXX Not sure if runs */
 	case FIELD:
 	case STRING:
-	case INT:
+	case ZMAP_INT:
 		return 1;
 	case OP:
 		break;
@@ -159,7 +159,7 @@ void print_expression(node_t *root)
 	case STRING:
 		printf("%s) ", root->value.string_literal);
 		break;
-	case INT:
+	case ZMAP_INT:
 		printf(" %llu) ", (long long unsigned)root->value.int_literal);
 		break;
 	default:

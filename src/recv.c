@@ -9,6 +9,7 @@
 #include "recv.h"
 
 #include <assert.h>
+#include <string.h>
 
 #include "../lib/includes.h"
 #include "cachehash.h"
@@ -33,18 +34,71 @@ static u_char fake_eth_hdr[65535];
 // bitmap of observed IP addresses
 static uint8_t **seen = NULL;
 static cachehash *ch = NULL;
+static int win_relax_dst_ip_filter = -1;
+static int win_relax_dst_port_filter = -1;
+
+static int env_enabled(const char *name)
+{
+	const char *v = getenv(name);
+	return v && v[0] != '\0' && strcmp(v, "0") != 0;
+}
+
+static int should_enforce_dst_ip_filter(void)
+{
+#ifdef _WIN32
+	if (win_relax_dst_ip_filter < 0) {
+		win_relax_dst_ip_filter = env_enabled("ZMAP_WIN_RELAX_DST_IP") ? 1 : 0;
+	}
+	return win_relax_dst_ip_filter == 0;
+#else
+	return 1;
+#endif
+}
+
+static int should_enforce_dst_port_filter(void)
+{
+#ifdef _WIN32
+	if (win_relax_dst_port_filter < 0) {
+		win_relax_dst_port_filter =
+		    env_enabled("ZMAP_WIN_RELAX_DST_PORT") ? 1 : 0;
+	}
+	return win_relax_dst_port_filter == 0;
+#else
+	return 1;
+#endif
+}
+
+static inline int packet_dst_is_local(uint32_t dst_ip)
+{
+	for (uint32_t i = 0; i < zconf.number_source_ips; i++) {
+		if (zconf.source_ip_addresses[i] == dst_ip) {
+			return 1;
+		}
+	}
+	return 0;
+}
 
 void handle_packet(uint32_t buflen, const u_char *bytes,
 		   const struct timespec ts)
 {
+	zrecv.packets_seen++;
 	if ((sizeof(struct ip) + zconf.data_link_size) > buflen) {
 		// buffer not large enough to contain ethernet
 		// and ip headers. further action would overrun buf
+		zrecv.packets_too_small++;
 		return;
 	}
 	struct ip *ip_hdr = (struct ip *)&bytes[zconf.data_link_size];
 	uint32_t src_ip = ip_hdr->ip_src.s_addr;
 	uint16_t src_port = 0;
+	uint16_t dst_port = 0;
+
+	// Fast-path reject for packets not addressed to one of our source IPs.
+	// This keeps unrelated traffic out of transport parsing and validation.
+	if (should_enforce_dst_ip_filter() &&
+	    !packet_dst_is_local(ip_hdr->ip_dst.s_addr)) {
+		return;
+	}
 
 	uint32_t len_ip_and_payload =
 	    buflen - (zconf.send_ip_pkts ? 0 : sizeof(struct ether_header));
@@ -54,12 +108,29 @@ void handle_packet(uint32_t buflen, const u_char *bytes,
 		struct tcphdr *tcp = get_tcp_header(ip_hdr, len_ip_and_payload);
 		if (tcp) {
 			src_port = tcp->th_sport;
+			dst_port = tcp->th_dport;
 		}
 	} else if (ip_hdr->ip_p == IPPROTO_UDP) {
 		struct udphdr *udp = get_udp_header(ip_hdr, len_ip_and_payload);
 		if (udp) {
 			src_port = udp->uh_sport;
+			dst_port = udp->uh_dport;
 		}
+	}
+
+	// For direct TCP/UDP responses, destination port must be one of the
+	// source ports used by this scan run.
+	if (dst_port != 0 && should_enforce_dst_port_filter()) {
+		uint16_t dport_host = ntohs(dst_port);
+		if (dport_host < zconf.source_port_first ||
+		    dport_host > zconf.source_port_last) {
+			zrecv.packets_wrong_dst_port++;
+			return;
+		}
+	}
+
+	if (src_port == 0 && ip_hdr->ip_p != IPPROTO_ICMP) {
+		return;
 	}
 
 	uint32_t validation[VALIDATE_BYTES / sizeof(uint32_t)];

@@ -13,9 +13,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#ifndef _WIN32
 #include <sched.h>
+#endif
 #include <errno.h>
+#ifndef _WIN32
 #include <pwd.h>
+#endif
 #include <time.h>
 #include <getopt.h>
 

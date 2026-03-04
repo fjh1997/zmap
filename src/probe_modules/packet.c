@@ -19,7 +19,7 @@
 #include "module_tcp_synscan.h"
 #include "logger.h"
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(_WIN32)
 void print_macaddr(struct ifreq *i)
 {
 	printf("Device %s -> Ethernet %02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -30,7 +30,7 @@ void print_macaddr(struct ifreq *i)
 	       (int)((unsigned char *)&i->ifr_addr.sa_data)[4],
 	       (int)((unsigned char *)&i->ifr_addr.sa_data)[5]);
 }
-#endif /* NDEBUG */
+#endif /* !NDEBUG && !_WIN32 */
 
 #define IP_ADDR_LEN_STR 20
 
@@ -90,7 +90,7 @@ void make_ip_header(struct ip *iph, uint8_t protocol, uint16_t len)
 	iph->ip_len = len;
 	iph->ip_id = htons(54321); // identification number
 	iph->ip_off = 0;	   // fragmentation flag
-	iph->ip_ttl = MAXTTL;	   // time to live (TTL)
+	iph->ip_ttl = 255;	   // time to live (TTL) - max
 	iph->ip_p = protocol;	   // upper layer protocol => TCP
 	// we set the checksum = 0 for now because that's
 	// what it needs to be when we run the IP checksum
@@ -107,7 +107,7 @@ void make_icmp_header(struct icmp *buf)
 
 void make_tcp_header(struct tcphdr *tcp_header, uint16_t th_flags)
 {
-	tcp_header->th_seq = random();
+	tcp_header->th_seq = rand();
 	tcp_header->th_ack = 0;
 	tcp_header->th_x2 = 0;
 	tcp_header->th_off = 5; // data offset

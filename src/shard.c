@@ -17,6 +17,20 @@
 #include "shard.h"
 #include "state.h"
 
+static void mpz_init_set_u64(mpz_t out, uint64_t value)
+{
+	mpz_init(out);
+	mpz_import(out, 1, 1, sizeof(value), 0, 0, &value);
+}
+
+static uint64_t mpz_get_u64(const mpz_t in)
+{
+	uint64_t value = 0;
+	size_t words = 0;
+	mpz_export(&value, &words, 1, sizeof(value), 0, 0, in);
+	return value;
+}
+
 static inline uint16_t extract_port(uint64_t v, uint8_t bits)
 {
 	uint64_t mask = (1 << bits) - 1;
@@ -87,10 +101,10 @@ void shard_init(shard_t *shard, uint16_t shard_idx, uint16_t num_shards,
 
 	// Multiprecision variants of everything above
 	mpz_t generator_m, exponent_begin_m, exponent_end_m, prime_m;
-	mpz_init_set_ui(generator_m, cycle->generator);
-	mpz_init_set_ui(exponent_begin_m, exponent_begin);
-	mpz_init_set_ui(exponent_end_m, exponent_end);
-	mpz_init_set_ui(prime_m, cycle->group->prime);
+	mpz_init_set_u64(generator_m, cycle->generator);
+	mpz_init_set_u64(exponent_begin_m, exponent_begin);
+	mpz_init_set_u64(exponent_end_m, exponent_end);
+	mpz_init_set_u64(prime_m, cycle->group->prime);
 
 	// Calculate the first and last points of the shard as powers of g
 	// modulo p.
@@ -101,8 +115,8 @@ void shard_init(shard_t *shard, uint16_t shard_idx, uint16_t num_shards,
 	mpz_powm(stop_m, generator_m, exponent_end_m, prime_m);
 
 	// Pull the result out as a uint64_t
-	shard->params.first = (uint64_t)mpz_get_ui(start_m);
-	shard->params.last = (uint64_t)mpz_get_ui(stop_m);
+	shard->params.first = mpz_get_u64(start_m);
+	shard->params.last = mpz_get_u64(stop_m);
 	shard->params.factor = cycle->generator;
 	shard->params.modulus = cycle->group->prime;
 	shard->bits_for_port = bits_for_port;

@@ -28,7 +28,7 @@ typedef struct bl_cidr_node {
 
 uint32_t blocklist_lookup_index(uint64_t index);
 
-int blocklist_is_allowed(uint32_t s_addr);
+int blocklist_is_allowed(uint32_t ip_addr);
 
 void blocklist_prefix(char *ip, int prefix_len);
 

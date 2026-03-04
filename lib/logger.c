@@ -7,13 +7,17 @@
  */
 
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/time.h>
+#include <syslog.h>
+#else
+#include "compat_win.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include <sys/time.h>
 #include <time.h>
-#include <syslog.h>
 #include <math.h>
 #include <pthread.h>
 
@@ -27,7 +31,9 @@ static enum LogLevel log_output_level = ZLOG_INFO;
 static FILE *log_output_stream = NULL;
 static int color = 0;
 
+#ifndef _WIN32
 static int log_to_syslog = 0;
+#endif
 
 static const char *log_level_name[] = {"FATAL", "ERROR", "WARN",
 				       "INFO", "DEBUG", "TRACE"};
@@ -126,11 +132,13 @@ int log_fatal(const char *name, const char *message, ...)
 	LogLogVA(ZLOG_FATAL, name, message, va);
 	va_end(va);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_CRIT), message, va);
 		va_end(va);
 	}
+#endif
 
 	exit(EXIT_FAILURE);
 }
@@ -142,11 +150,13 @@ int log_error(const char *name, const char *message, ...)
 	int ret = LogLogVA(ZLOG_ERROR, name, message, va);
 	va_end(va);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_ERR), message, va);
 		va_end(va);
 	}
+#endif
 
 	return ret;
 }
@@ -158,11 +168,13 @@ int log_warn(const char *name, const char *message, ...)
 	int ret = LogLogVA(ZLOG_WARN, name, message, va);
 	va_end(va);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_WARNING), message, va);
 		va_end(va);
 	}
+#endif
 
 	return ret;
 }
@@ -179,11 +191,13 @@ int log_info(const char *name, const char *message, ...)
 	strcat(prefixed, ": ");
 	strcat(prefixed, message);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_INFO), prefixed, va);
 		va_end(va);
 	}
+#endif
 
 	free(prefixed);
 
@@ -202,11 +216,13 @@ int log_debug(const char *name, const char *message, ...)
 	strcat(prefixed, ": ");
 	strcat(prefixed, message);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_DEBUG), prefixed, va);
 		va_end(va);
 	}
+#endif
 
 	free(prefixed);
 
@@ -226,11 +242,13 @@ extern int log_trace(const char *name, const char *message, ...)
 	strcat(prefixed, ": ");
 	strcat(prefixed, message);
 
+#ifndef _WIN32
 	if (log_to_syslog) {
 		va_start(va, message);
 		vsyslog(LOG_MAKEPRI(LOG_USER, LOG_DEBUG), prefixed, va);
 		va_end(va);
 	}
+#endif
 
 	free(prefixed);
 
@@ -243,10 +261,15 @@ int log_init(FILE *stream, enum LogLevel level, int syslog_enabled,
 {
 	log_output_stream = stream;
 	log_output_level = level;
+#ifndef _WIN32
 	if (syslog_enabled) {
 		log_to_syslog = 1;
 		openlog(appname, 0, LOG_USER); // no options
 	}
+#else
+	(void)syslog_enabled;
+	(void)appname;
+#endif
 	if (isatty(fileno(log_output_stream))) {
 		color = 1;
 	}
@@ -262,10 +285,20 @@ void check_and_log_file_error(FILE *file, const char *name)
 
 size_t dstrftime(char *buf, size_t maxsize, const char *format, double tm)
 {
-	struct timeval tv;
-	double tm_floor;
-	tm_floor = floor(tm);
-	tv.tv_sec = (long)tm_floor;
-	tv.tv_usec = (long)(tm - floor(tm)) * 1000000;
-	return strftime(buf, maxsize, format, localtime((const time_t *)&tv));
+	if (!buf || maxsize == 0) {
+		return 0;
+	}
+	buf[0] = '\0';
+
+	double tm_floor = floor(tm);
+	time_t t = (time_t)tm_floor;
+	struct tm *tm_local = localtime(&t);
+	if (!tm_local) {
+		return 0;
+	}
+	size_t written = strftime(buf, maxsize, format, tm_local);
+	if (written == 0) {
+		buf[0] = '\0';
+	}
+	return written;
 }

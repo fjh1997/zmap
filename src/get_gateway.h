@@ -9,7 +9,11 @@
 #ifndef GET_GATEWAY_H
 #define GET_GATEWAY_H
 
+#ifdef _WIN32
+#include "../lib/compat_win.h"
+#else
 #include <netinet/in.h>
+#endif
 
 int get_hw_addr(struct in_addr *gw_ip, char *iface, unsigned char *hw_mac);
 int get_default_gw(struct in_addr *gw, char *iface);

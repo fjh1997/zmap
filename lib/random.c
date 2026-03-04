@@ -14,6 +14,28 @@
 #include <errno.h>
 #include "logger.h"
 
+#ifdef _WIN32
+
+#include <windows.h>
+#include <bcrypt.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "bcrypt.lib")
+#endif
+
+int random_bytes(void *dst, size_t n)
+{
+	NTSTATUS status =
+	    BCryptGenRandom(NULL, (PUCHAR)dst, (ULONG)n,
+			    BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+	if (!BCRYPT_SUCCESS(status)) {
+		log_fatal("random", "BCryptGenRandom failed: 0x%lx",
+			  (unsigned long)status);
+	}
+	return 1;
+}
+
+#else /* UNIX */
+
 #define RANDSRC "/dev/urandom"
 
 int random_bytes(void *dst, size_t n)
@@ -30,3 +52,5 @@ int random_bytes(void *dst, size_t n)
 	}
 	return 1;
 }
+
+#endif /* _WIN32 */

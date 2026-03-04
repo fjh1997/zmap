@@ -20,9 +20,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/time.h>
-#include <time.h>
 #include <unistd.h>
+#else
+#include "../lib/compat_win.h"
+#endif
+#include <time.h>
 
 #include "../lib/lockfd.h"
 #include "../lib/logger.h"
@@ -501,7 +505,11 @@ void monitor_run(iterator_t *it, pthread_mutex_t *lock)
 	// wait for the scanning process to finish
 	while (!(zsend.complete && zrecv.complete)) {
 		export_then_update(internal_status, it, export_status, lock);
+#ifdef _WIN32
+		Sleep((DWORD)(UPDATE_INTERVAL * 1000));
+#else
 		sleep(UPDATE_INTERVAL);
+#endif
 	}
 	// final update
 	export_then_update(internal_status, it, export_status, lock);

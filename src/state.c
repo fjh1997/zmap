@@ -82,6 +82,13 @@ struct state_send zsend = {
     .finish = 0.0,
     .packets_sent = 0,
     .targets_scanned = 0,
+    .batch_send_calls = 0,
+    .batch_packets_attempted = 0,
+    .batch_packets_sent = 0,
+#ifdef _WIN32
+    .win_xdp_batch_calls = 0,
+    .win_npcap_batch_calls = 0,
+#endif
     .warmup = 1,
     .complete = 0,
     .sendto_failures = 0,
@@ -91,6 +98,9 @@ struct state_send zsend = {
 
 // global receiver stats and defaults
 struct state_recv zrecv = {
+    .packets_seen = 0,
+    .packets_too_small = 0,
+    .packets_wrong_dst_port = 0,
     .success_unique = 0,
     .success_total = 0,
     .app_success_unique = 0,
@@ -106,4 +116,7 @@ struct state_recv zrecv = {
     .pcap_recv = 0,
     .pcap_drop = 0,
     .pcap_ifdrop = 0,
+    .pcap_dispatch_calls = 0,
+    .pcap_dispatch_zero = 0,
+    .pcap_dispatch_packets = 0,
 };

@@ -11,9 +11,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include "../../lib/includes.h"
 #include <assert.h>
 #include <inttypes.h>
 

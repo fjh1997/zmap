@@ -12,12 +12,16 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <pthread.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#ifndef _WIN32
 #include <signal.h>
+#endif
 
 #include "../lib/includes.h"
 #include "../lib/util.h"
@@ -45,6 +49,15 @@ static pthread_mutex_t send_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Source ports for outgoing packets
 static uint16_t num_src_ports;
+
+static inline void stat_add_u64(uint64_t *value, uint64_t delta)
+{
+#if defined(__GNUC__) || defined(__clang__)
+	__sync_fetch_and_add(value, delta);
+#else
+	*value += delta;
+#endif
+}
 
 void sig_handler_increase_speed(UNUSED int signal)
 {
@@ -129,28 +142,34 @@ iterator_t *send_init(void)
 	// Get the source hardware address, and give it to the probe
 	// module
 	if (!zconf.hw_mac_set) {
-		if (get_iface_hw_addr(zconf.iface, zconf.hw_mac)) {
-			log_fatal(
+		if (zconf.send_ip_pkts) {
+			memset(zconf.hw_mac, 0, sizeof(zconf.hw_mac));
+		} else {
+			if (get_iface_hw_addr(zconf.iface, zconf.hw_mac)) {
+				log_fatal(
+				    "send",
+				    "ZMap could not retrieve the hardware (MAC) address for "
+				    "the interface \"%s\". You likely do not privileges to open a raw packet socket. "
+				    "Are you running as root or with the CAP_NET_RAW capability? If you are, you "
+				    "may need to manually set the source MAC address with the \"--source-mac\" flag.",
+				    zconf.iface);
+				return NULL;
+			}
+			log_debug(
 			    "send",
-			    "ZMap could not retrieve the hardware (MAC) address for "
-			    "the interface \"%s\". You likely do not privileges to open a raw packet socket. "
-			    "Are you running as root or with the CAP_NET_RAW capability? If you are, you "
-			    "may need to manually set the source MAC address with the \"--source-mac\" flag.",
+			    "no source MAC provided. "
+			    "automatically detected %02x:%02x:%02x:%02x:%02x:%02x as hw "
+			    "interface for %s",
+			    zconf.hw_mac[0], zconf.hw_mac[1], zconf.hw_mac[2],
+			    zconf.hw_mac[3], zconf.hw_mac[4], zconf.hw_mac[5],
 			    zconf.iface);
-			return NULL;
 		}
-		log_debug(
-		    "send",
-		    "no source MAC provided. "
-		    "automatically detected %02x:%02x:%02x:%02x:%02x:%02x as hw "
-		    "interface for %s",
-		    zconf.hw_mac[0], zconf.hw_mac[1], zconf.hw_mac[2],
-		    zconf.hw_mac[3], zconf.hw_mac[4], zconf.hw_mac[5],
-		    zconf.iface);
 	}
-	log_debug("send", "source MAC address %02x:%02x:%02x:%02x:%02x:%02x",
-		  zconf.hw_mac[0], zconf.hw_mac[1], zconf.hw_mac[2],
-		  zconf.hw_mac[3], zconf.hw_mac[4], zconf.hw_mac[5]);
+	if (!zconf.send_ip_pkts) {
+		log_debug("send", "source MAC address %02x:%02x:%02x:%02x:%02x:%02x",
+			  zconf.hw_mac[0], zconf.hw_mac[1], zconf.hw_mac[2],
+			  zconf.hw_mac[3], zconf.hw_mac[4], zconf.hw_mac[5]);
+	}
 
 	if (zconf.dryrun) {
 		log_info("send", "dryrun mode -- won't actually send packets");
@@ -193,8 +212,10 @@ iterator_t *send_init(void)
 	// initialize random validation key
 	validate_init();
 	// setup signal handlers for changing scan speed
+#ifndef _WIN32
 	signal(SIGUSR1, sig_handler_increase_speed);
 	signal(SIGUSR2, sig_handler_decrease_speed);
+#endif
 	zsend.start = now();
 	return it;
 }
@@ -446,6 +467,20 @@ int send_run(sock_t st, shard_t *s)
 				if (batch->len == batch->capacity) {
 					// log_debug("send_batch", "sending batch");
 					// batch is full, sending
+					stat_add_u64(&zsend.batch_send_calls, 1);
+					stat_add_u64(&zsend.batch_packets_attempted,
+						     batch->len);
+#ifdef _WIN32
+					if (st.win.backend == WIN_SEND_BACKEND_XDP) {
+						stat_add_u64(&zsend.win_xdp_batch_calls,
+							     1);
+					} else if (st.win.backend ==
+						   WIN_SEND_BACKEND_NPCAP) {
+						stat_add_u64(
+						    &zsend.win_npcap_batch_calls,
+						    1);
+					}
+#endif
 					int rc = send_batch(st, batch, attempts);
 					// whether batch succeeds or fails, this was the only attempt. Any re-tries are handled within batch
 					if (rc < 0) {
@@ -455,6 +490,8 @@ int send_run(sock_t st, shard_t *s)
 					} else {
 						// rc is number of packets sent successfully, if > 0
 						s->state.packets_failed += batch->len - rc;
+						stat_add_u64(&zsend.batch_packets_sent,
+							     (uint64_t)rc);
 					}
 					// reset batch length for next batch
 					batch->len = 0;
@@ -488,8 +525,22 @@ int send_run(sock_t st, shard_t *s)
 		}
 	}
 cleanup:
-	if (!zconf.dryrun && send_batch(st, batch, attempts) < 0) {
-		log_error("send_batch cleanup", "could not send remaining batch packets: %s", strerror(errno));
+	if (!zconf.dryrun) {
+		stat_add_u64(&zsend.batch_send_calls, 1);
+		stat_add_u64(&zsend.batch_packets_attempted, batch->len);
+#ifdef _WIN32
+		if (st.win.backend == WIN_SEND_BACKEND_XDP) {
+			stat_add_u64(&zsend.win_xdp_batch_calls, 1);
+		} else if (st.win.backend == WIN_SEND_BACKEND_NPCAP) {
+			stat_add_u64(&zsend.win_npcap_batch_calls, 1);
+		}
+#endif
+		int rc = send_batch(st, batch, attempts);
+		if (rc < 0) {
+			log_error("send_batch cleanup", "could not send remaining batch packets: %s", strerror(errno));
+		} else {
+			stat_add_u64(&zsend.batch_packets_sent, (uint64_t)rc);
+		}
 	} else if (zconf.dryrun) {
 		lock_file(stdout);
 		for (int i = 0; i < batch->len; i++) {
@@ -500,6 +551,9 @@ cleanup:
 		// reset batch length for next batch
 		batch->len = 0;
 	}
+#ifdef _WIN32
+	send_run_cleanup(st);
+#endif
 	free_packet_batch(batch);
 	s->cb(s->thread_id, s->arg);
 	if (zconf.dryrun) {
