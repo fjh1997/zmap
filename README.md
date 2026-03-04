@@ -56,6 +56,64 @@ Installation
 The latest stable release of ZMap is [4.3.4](https://github.com/zmap/zmap/releases/tag/v4.3.4) and supports Linux, macOS, and
 BSD. See [INSTALL](INSTALL.md) for instructions on to install ZMap through a package manager or from source.
 
+Windows Build and Usage (This Fork)
+-----------------------------------
+
+This repository contains Windows send/receive backends (XDP + Npcap) in addition to the upstream Unix paths.
+
+### Prerequisites
+
+1. MSYS2 MinGW64 toolchain (for `gcc`, `cmake`, `mingw32-make`), for example under `C:\msys64\mingw64\bin`.
+2. Npcap installed on the machine (runtime DLLs under `C:\Windows\System32\Npcap\`).
+3. Npcap SDK headers/libs under `C:\npcap-sdk` (or set `NPCAP_SDK` environment variable).
+4. Optional for XDP backend: XDP for Windows runtime (`xdpapi.dll` available in `PATH`).
+
+### Build (PowerShell)
+
+```powershell
+$env:PATH = 'C:\msys64\mingw64\bin;' + $env:PATH
+$cmake = 'C:\msys64\mingw64\bin\cmake.exe'
+& $cmake -S . -B build_ascii -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=Release
+& $cmake --build build_ascii --target zmap -j 8
+```
+
+### Package `zmap.exe` with runtime DLLs
+
+`src/CMakeLists.txt` already copies MinGW + Npcap runtime DLLs to the executable directory after build. To stage a distributable folder with all dynamic libraries:
+
+```powershell
+$dist = 'dist\zmap-win64'
+New-Item -ItemType Directory -Force $dist | Out-Null
+Copy-Item build_ascii\src\zmap.exe $dist
+Copy-Item build_ascii\src\*.dll $dist
+```
+
+Typical DLLs in `build_ascii\src\`:
+`libpcap.dll`, `Packet.dll`, `wpcap.dll`, `libwinpthread-1.dll`, `libgcc_s_seh-1.dll`, `libgmp-10.dll`, `libjson-c-5.dll`, `libiconv-2.dll`, `libunistring-5.dll` (and `xdpapi.dll` when XDP runtime is installed).
+
+### Windows usage
+
+Run from an elevated terminal (Administrator), and specify the Npcap interface:
+
+```powershell
+.\build_ascii\src\zmap.exe -p 80 -i '\Device\NPF_{YOUR-ADAPTER-GUID}' -o result.csv
+```
+
+Backend control via environment variables:
+
+- `ZMAP_WIN_BACKEND=auto|xdp|npcap|rawip` (default `auto`, prefers XDP then falls back to Npcap).
+- `ZMAP_WIN_RX_BACKEND=xdp` to enable XDP receive path.
+- `ZMAP_WIN_XDP_RX_MULTI=1` to try opening multiple RX queues (queue 0..N).
+- `ZMAP_WIN_XDP_RX_QUEUE=<id>` to pin XDP RX to a single queue.
+
+### Why Windows host is slower than WSL2 on RTL8125
+
+On common Realtek RTL8125 Windows drivers, XDP works in Generic mode (NDIS/LWF path), not Native mode (miniport fast path).  
+WSL2 traffic uses Hyper-V guest networking (`netvsc` + VMQ/VMBus data path), which bypasses most host-side LWF overhead.  
+The host/root partition cannot use guest `netvsc` semantics directly, so this performance gap is architectural on this NIC/driver stack.
+
+To get closer to WSL2 performance from a native Windows process, use hardware/driver stacks that support Native XDP.
+
 Architecture
 ------------
 
